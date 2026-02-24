@@ -10,18 +10,34 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 const db = require("./app/models");
-db.mongoose
-  .connect(db.url, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true
-  })
-  .then(() => {
+
+// Retry MongoDB connection with exponential backoff
+const MAX_RETRIES = 5;
+const BASE_DELAY_MS = 2000;
+
+async function connectWithRetry(retries = 0) {
+  try {
+    await db.mongoose.connect(db.url, {
+      useNewUrlParser: true,
+      useUnifiedTopology: true
+    });
     console.log("Connected to the database!");
-  })
-  .catch(err => {
-    console.log("Cannot connect to the database!", err);
-    process.exit();
-  });
+  } catch (err) {
+    if (retries >= MAX_RETRIES) {
+      console.error(`Failed to connect after ${MAX_RETRIES} retries. Exiting.`);
+      process.exit(1);
+    }
+    const delay = BASE_DELAY_MS * Math.pow(2, retries);
+    console.warn(
+      `MongoDB connection attempt ${retries + 1} failed. Retrying in ${delay / 1000}s...`,
+      err.message
+    );
+    await new Promise(resolve => setTimeout(resolve, delay));
+    return connectWithRetry(retries + 1);
+  }
+}
+
+connectWithRetry();
 
 // simple route
 app.get("/", (req, res) => {
